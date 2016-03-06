@@ -1,0 +1,27 @@
+diff --git a/gas/ChangeLog b/gas/ChangeLog
+index 3ca4c44..ed60b65 100644
+--- a/gas/ChangeLog
++++ b/gas/ChangeLog
+@@ -1,3 +1,9 @@
++2010-03-30  H.J. Lu  <hongjiu.lu@intel.com>
++
++	PR gas/11456
++	* input-scrub.c (input_scrub_next_buffer): Use memmove instead
++	of memcpy to copy overlap memory.
++
+ 2009-01-14  Jakub Jelinek  <jakub@redhat.com>
+ 
+ 	* Makefile.am (ehopt.o): Add struc-symbol.h.
+diff --git a/gas/input-scrub.c b/gas/input-scrub.c
+index 21a4651..27cc10d 100644
+--- a/gas/input-scrub.c
++++ b/gas/input-scrub.c
+@@ -335,7 +335,7 @@ input_scrub_next_buffer (char **bufp)
+ 
+   if (partial_size)
+     {
+-      memcpy (buffer_start + BEFORE_SIZE, partial_where,
++      memmove (buffer_start + BEFORE_SIZE, partial_where,
+ 	      (unsigned int) partial_size);
+       memcpy (buffer_start + BEFORE_SIZE, save_source, AFTER_SIZE);
+     }
