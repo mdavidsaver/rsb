@@ -18,7 +18,7 @@
 #    - USE_COM1_AS_CONSOLE=1
 #    - BSP_PRESS_KEY_FOR_RESET=0
 #    - BSP_RESET_BOARD_AT_EXIT=1
-%define rtems_bsps      all
+%define rtems_bsps      pc386
 %define rtems_test_bsps none
 
 #
@@ -27,5 +27,5 @@
 devel/expat-2.1.0-1
 tools/rtems-binutils-2.20.1-1
 tools/rtems-gcc-4.4.7-newlib-1.18.0-1
-tools/rtems-gdb-7.3.1-1
+#tools/rtems-gdb-7.3.1-1
 tools/rtems-kernel-4.10.2
