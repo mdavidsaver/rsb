@@ -1,0 +1,120 @@
+diff -ru gcc-4.4.7.orig/gcc/cp/cfns.h gcc-4.4.7/gcc/cp/cfns.h
+--- gcc-4.4.7.orig/gcc/cp/cfns.h	2017-12-02 13:15:00.016100040 -0600
++++ gcc-4.4.7/gcc/cp/cfns.h	2017-12-02 13:35:28.084112580 -0600
+@@ -107,9 +107,6 @@
+ 
+ #ifdef __GNUC__
+ __inline
+-#ifdef __GNUC_STDC_INLINE__
+-__attribute__ ((__gnu_inline__))
+-#endif
+ #endif
+ const char *
+ libc_name_p (register const char *str, register unsigned int len)
+diff -ru gcc-4.4.7.orig/gcc/toplev.c gcc-4.4.7/gcc/toplev.c
+--- gcc-4.4.7.orig/gcc/toplev.c	2017-12-02 13:14:59.992099893 -0600
++++ gcc-4.4.7/gcc/toplev.c	2017-12-02 13:22:25.402930904 -0600
+@@ -523,64 +523,6 @@
+   return atoi (p);
+ }
+ 
+-/* When compiling with a recent enough GCC, we use the GNU C "extern inline"
+-   for floor_log2 and exact_log2; see toplev.h.  That construct, however,
+-   conflicts with the ISO C++ One Definition Rule.   */
+-
+-#if ((GCC_VERSION < 3004) || defined(__clang__)) || !defined (__cplusplus)
+-
+-/* Given X, an unsigned number, return the largest int Y such that 2**Y <= X.
+-   If X is 0, return -1.  */
+-
+-int
+-floor_log2 (unsigned HOST_WIDE_INT x)
+-{
+-  int t = 0;
+-
+-  if (x == 0)
+-    return -1;
+-
+-#ifdef CLZ_HWI
+-  t = HOST_BITS_PER_WIDE_INT - 1 - (int) CLZ_HWI (x);
+-#else
+-  if (HOST_BITS_PER_WIDE_INT > 64)
+-    if (x >= (unsigned HOST_WIDE_INT) 1 << (t + 64))
+-      t += 64;
+-  if (HOST_BITS_PER_WIDE_INT > 32)
+-    if (x >= ((unsigned HOST_WIDE_INT) 1) << (t + 32))
+-      t += 32;
+-  if (x >= ((unsigned HOST_WIDE_INT) 1) << (t + 16))
+-    t += 16;
+-  if (x >= ((unsigned HOST_WIDE_INT) 1) << (t + 8))
+-    t += 8;
+-  if (x >= ((unsigned HOST_WIDE_INT) 1) << (t + 4))
+-    t += 4;
+-  if (x >= ((unsigned HOST_WIDE_INT) 1) << (t + 2))
+-    t += 2;
+-  if (x >= ((unsigned HOST_WIDE_INT) 1) << (t + 1))
+-    t += 1;
+-#endif
+-
+-  return t;
+-}
+-
+-/* Return the logarithm of X, base 2, considering X unsigned,
+-   if X is a power of 2.  Otherwise, returns -1.  */
+-
+-int
+-exact_log2 (unsigned HOST_WIDE_INT x)
+-{
+-  if (x != (x & -x))
+-    return -1;
+-#ifdef CTZ_HWI
+-  return x ? CTZ_HWI (x) : -1;
+-#else
+-  return floor_log2 (x);
+-#endif
+-}
+-
+-#endif /*  GCC_VERSION < 3004 || !defined (__cplusplus)  */
+-
+ /* Handler for fatal signals, such as SIGSEGV.  These are transformed
+    into ICE messages, which is much more user friendly.  In case the
+    error printer crashes, reset the signal to prevent infinite recursion.  */
+diff -ru gcc-4.4.7.orig/gcc/toplev.h gcc-4.4.7/gcc/toplev.h
+--- gcc-4.4.7.orig/gcc/toplev.h	2017-12-02 13:14:59.980099821 -0600
++++ gcc-4.4.7/gcc/toplev.h	2017-12-02 13:24:01.535553650 -0600
+@@ -167,12 +167,6 @@
+ extern bool fast_math_flags_set_p	(void);
+ extern bool fast_math_flags_struct_set_p (struct cl_optimization *);
+ 
+-/* Return log2, or -1 if not exact.  */
+-extern int exact_log2                  (unsigned HOST_WIDE_INT);
+-
+-/* Return floor of log2, with -1 for zero.  */
+-extern int floor_log2                  (unsigned HOST_WIDE_INT);
+-
+ /* Inline versions of the above for speed.  */
+ #if (GCC_VERSION >= 3004) && !defined(__clang__)
+ # if HOST_BITS_PER_WIDE_INT == HOST_BITS_PER_LONG
+@@ -186,17 +180,20 @@
+ #  define CTZ_HWI __builtin_ctz
+ # endif
+ 
+-extern inline int
++static inline int
+ floor_log2 (unsigned HOST_WIDE_INT x)
+ {
+   return x ? HOST_BITS_PER_WIDE_INT - 1 - (int) CLZ_HWI (x) : -1;
+ }
+ 
+-extern inline int
++static inline int
+ exact_log2 (unsigned HOST_WIDE_INT x)
+ {
+   return x == (x & -x) && x ? (int) CTZ_HWI (x) : -1;
+ }
++
++#else
++#  error GCC <3.4 not supported
+ #endif /* GCC_VERSION >= 3004 */
+ 
+ /* Functions used to get and set GCC's notion of in what directory
