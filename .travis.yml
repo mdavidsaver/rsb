@@ -1,0 +1,29 @@
+sudo: false
+dist: trusty
+language: generic
+env:
+- DIST=trusty ARCH=i386 BSPS=pc386 VERSION=4.10
+- DIST=trusty ARCH=powerpc BSPS=mvme3100 VERSION=4.10
+addons:
+  apt:
+    packages:
+    - bison
+    - flex
+    - texinfo
+script:
+- travis_wait 60 ./.ci/build.sh
+- ./.ci/test.sh
+after_failure: "./.ci/failure.sh"
+before_deploy:
+- export TARFILE=$(ls *.tar.*)
+deploy:
+  provider: releases
+  skip_cleanup: true
+  api_key:
+    secure: NZE118h5yklkOZM4AdfSaNiSEM7VB2gm0/QLlmfJ6g6vv4XAXvrSvJg7vLFzHB8aFUifKWo28ejveBa0VZK0aCuwry6lUS0TIHPM//jRW44C5P5EFxiyAeR95v97vNpfpmnFRmrXtGQtOazzSZ3Dg2224DGxB5xy5Rsw2p4YBF4ZdavKxihKCGCASjYBG3Obkpj41RQrh3bmHgei1rd1pYqjmocUmPnVRy2gkhzAgt7nDBIRRbQ0/ETvDPgsG4DBw3mhmBnoCAkRZV3Lbr09L877159KY3H0e9daVAZZ03eP/k+w+vMxbD812XIURe+wQV/Twt5YaVkBmQGK740F1ER1JKuZ2YA/1uc1lWxIK2Fm8XV9iNj3+gZEU/CgH2IFDHO70txQjOAnsY2z6k790AA+yGzyV83OpoIUisKvXjzsMT+wnfyLn4odtKg6qIw4eWm65cuKraegBWByfTuI4CCFS7iqCvV6ACKNR91tCjxzfCibGwpWz1bx8WU01basTTS9UOa8I38TF+z5i65G4N3F3+HTPMmcG6txO3HmmdeCav3Aj+Q1aYuWItrIk0lLPBVDfDVAcdf9maAy+jE7cGGYfUEVgtE/EG0ySDpl78t/3yAtYQDiRIH98qmbY90Nxj6Q/utctNV87sMmdJtr2IUnbsKu7kgj+Uy+HZXxGHQ=
+  file: "${TARFILE}"
+  draft: false
+  prerelease: true
+  on:
+    repo: mdavidsaver/rsb
+    tags: true
