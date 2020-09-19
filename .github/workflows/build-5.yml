@@ -1,0 +1,198 @@
+# Build RTEMS 5 toolchains for multiple BSPs
+#
+# Resulting tars should be unpacked as
+#
+# sudo install -d -o $USER /opt/rtems/5
+# tar -C / -xaf *-*-rtems5.tar.xz
+#
+# Currently the install prefix is hard-coded, and may not be changed.
+# eg. prefix= in /opt/rtems/5/make/*-rtems5/*/Makefile.inc
+
+name: RTEMS 5
+
+on: [push, pull_request]
+
+defaults:
+  run:
+    working-directory: rtems
+
+jobs:
+    # Release prep, only for tags
+    prepare:
+        name: Release Prep
+        runs-on: ubuntu-20.04
+        outputs:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+        steps:
+            - uses: actions/checkout@v2
+
+            - name: Create Release ${{ github.ref }}
+              # only release tags
+              if: startsWith(github.ref, 'refs/tags/')
+              id: create_release
+              uses: actions/create-release@v1
+              env:
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                tag_name: ${{ github.ref }}
+                release_name: Release ${{ github.ref }}
+                draft: true
+                prerelease: false
+
+    toolchain:
+        name: Toolchain ${{ matrix.arch }}
+        runs-on: ubuntu-20.04
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                - arch: i386
+                - arch: powerpc
+                - arch: arm
+                - arch: m68k
+        steps:
+            - uses: actions/checkout@v2
+
+            - name: setup prefix
+              run: sudo install -d -o $USER /opt/rtems/5
+
+            - name: system deps
+              run: sudo apt-get -y update && sudo apt-get -y install bison flex texinfo unzip git python-dev
+
+            - name: check
+              run: ../source-builder/sb-check
+
+            - name: build
+              run: ../source-builder/sb-set-builder --prefix=/opt/rtems/5 --log build.log 5/rtems-${{ matrix.arch }}
+
+            - name: error log
+              if: ${{ failure() }}
+              run: tail -n 100 build.log
+
+            # strip only host toolchain binaries.  eg. gcc itself
+            - name: stripntar
+              run: |
+                du -csh /opt/rtems/5
+                strip -d /opt/rtems/5/*/libexec/gcc/*/*/cc1* || true
+                strip -d /opt/rtems/5/*/bin/* || true
+                du -csh /opt/rtems/5
+                tar -C / -cavf ../toolchain.tar.bz2 /opt/rtems/5
+
+            # store for later use by BSP job(s) for this arch
+            - name: stash
+              uses: actions/upload-artifact@v2
+              with:
+                  name: toolchain-${{ matrix.arch }}
+                  path: toolchain.tar.bz2
+                  retention-days: 1
+
+    bsp:
+        name: BSP ${{ matrix.arch }}/${{ matrix.bsp }}
+        runs-on: ubuntu-20.04
+        # depending on prepare populates needs.prepare.outputs.
+        needs: [prepare, toolchain]
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                - arch: i386
+                  bsp: pc686
+                  extra: 5/rtems-libbsd
+                  test: true
+
+                - arch: powerpc
+                  bsp: beatnik
+                  kopts: --with-rtems-legacy-network
+
+                - arch: powerpc
+                  bsp: mcp750
+                  kopts: --with-rtems-legacy-network
+
+                - arch: powerpc
+                  bsp: mvme2100
+                  kopts: --with-rtems-legacy-network
+
+                - arch: powerpc
+                  bsp: mvme3100
+                  kopts: --with-rtems-legacy-network
+
+                - arch: powerpc
+                  bsp: qoriq_e500
+                  extra: 5/rtems-libbsd
+
+                - arch: arm
+                  bsp: xilinx_zynq_a9_qemu
+                  extra: 5/rtems-libbsd
+
+                - arch: m68k
+                  bsp: gen68360
+                  kopts: --with-rtems-legacy-network
+
+                - arch: m68k
+                  bsp: mvme167
+                  kopts: --with-rtems-legacy-network
+
+                - arch: m68k
+                  bsp: uC5282
+                  kopts: --with-rtems-legacy-network
+        steps:
+            - uses: actions/checkout@v2
+
+            - name: Download a single artifact
+              uses: actions/download-artifact@v2
+              with:
+                  name: toolchain-${{ matrix.arch }}
+
+            - name: setup prefix and unpack
+              run: |
+                sudo install -d -o $USER /opt/rtems/5
+                tar -C / -xaf ../toolchain.tar.bz2
+                ls /opt/rtems/5
+
+            - name: system deps
+              run: sudo apt-get -y update && sudo apt-get -y install bison flex texinfo unzip git python-dev qemu-system-x86 cmake
+
+            - name: check
+              run: ../source-builder/sb-check
+
+            - name: build kernel
+              run: |
+                export PATH=/opt/rtems/5/bin:$PATH
+                ../source-builder/sb-set-builder --prefix=/opt/rtems/5 --log build.log \
+                --host=${{ matrix.arch }}-rtems5 --target=${{ matrix.arch }}-rtems5 \
+                --with-rtems-bsp=${{ matrix.bsp }} ${{ matrix.kopts }} 5/rtems-kernel ${{ matrix.extra }}
+
+            - name: error log
+              if: ${{ failure() }}
+              run: tail -n 100 build.log
+
+            - name: run tests
+              if: matrix.test
+              run: |
+                for ff in /opt/rtems/5/${{ matrix.arch }}-rtems5/${{ matrix.bsp }}/tests/*.exe; do
+                    echo "==== $ff";
+                    qemu-system-${{ matrix.arch }} -m 64 -no-reboot -serial stdio -display none -append --console=/dev/com1 -kernel $ff || exit 1;
+                done
+
+            - name: tar
+              run: |
+                tar -C / -cv /opt/rtems/5 | xz -T 0 -9e > ../${{ matrix.bsp }}-rtems5.tar.xz
+
+            # upload to possible manual testing
+            - name: stash
+              uses: actions/upload-artifact@v2
+              with:
+                  name: bsp-${{ matrix.bsp }}
+                  path: ./${{ matrix.bsp }}-rtems5.tar.xz
+                  retention-days: 1
+
+            - name: release
+              if: startsWith(github.ref, 'refs/tags/')
+              uses: actions/upload-release-asset@v1
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                  upload_url: ${{ needs.prepare.outputs.upload_url }}
+                  asset_path: ./${{ matrix.bsp }}-rtems5.tar.xz
+                  asset_name: ${{ matrix.bsp }}-rtems5.tar.xz
+                  asset_content_type: application/x-tar
