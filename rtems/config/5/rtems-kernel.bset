@@ -9,6 +9,10 @@
 %include rtems-version.bset
 %include rtems-urls.bset
 
+patch add rtems_kernel -p1 file://dumm.diffh
+patch add rtems_kernel -p1 https://raw.githubusercontent.com/hjunkes/rsb/master/rtems/local_patch/0001-pc386-BSP-try-first-PCI-I-O-interface-instead-of-PCI.patch
+hash sha512 0001-pc386-BSP-try-first-PCI-I-O-interface-instead-of-PCI.patch 595645ad6c4e1323eb111ffc5bd8d881d6efb49f5a0a7ae98a17c7a5ce9826b331dbc8511702e7e1ea8742d36452ebc2c3fb662a81d59777cb83058165f286ce
+
 #
 # Build the kernel.
 #
