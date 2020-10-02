@@ -1,7 +1,8 @@
 #
 # RTEMS LibBSD configuration.
 #
-
+%patch add rtems_libbsd https://devel.rtems.org/raw-attachment/ticket/4113/libbsd-dhcpcd.diff
+%hash sha512 libbsd-dhcpcd.diff d12cefc982abc21ba7abdbd73ece18770919428acb944cd3e3cb87a1db63cd6729c2ec8e64a34620798a6af42f526cb6376eae4b448f69f8256e07ce66f76fd0
 #
 # Build the BSD library for RTEMS.
 #
