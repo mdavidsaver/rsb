@@ -1,0 +1,56 @@
+name: RTEMS 5
+
+on: [push, pull_request]
+
+defaults:
+  run:
+    working-directory: rtems
+
+jobs:
+  build-pc686:
+    name: i386
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v2
+    - name: system deps
+      run: sudo apt-get -y update && sudo apt-get -y install bison flex texinfo unzip git python-dev qemu-system-x86
+    - name: check
+      run: ../source-builder/sb-check
+    - name: build toolchain
+      run: ../source-builder/sb-set-builder --prefix=$HOME/.rtems --log i386.log 5/rtems-i386
+    - name: build kernel
+      run: ../source-builder/sb-set-builder --prefix=$HOME/.rtems --log i386-pc686.log --host=i386-rtems5 --target=i386-rtems5 --with-rtems-bsp=pc686 5/rtems-kernel 5/rtems-libbsd
+    - name: error log
+      if: ${{ failure() }}
+      run: |
+        echo "==============="
+        tail -n 100 i386.log
+        echo "==============="
+        tail -n 100 i386-pc686.log
+    - name: run tests
+      run: |
+        for ff in $HOME/.rtems/i386-rtems5/pc686/tests/*.exe; 
+          do echo "==== $ff";
+          qemu-system-i386 -m 64 -no-reboot -serial stdio -display none -append --console=/dev/com1 -kernel $ff || exit 1;
+        done
+
+  build-mvme3100:
+    name: mvme3100
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v2
+    - name: system deps
+      run: sudo apt-get -y update && sudo apt-get -y install bison flex texinfo unzip git python-dev
+    - name: check
+      run: ../source-builder/sb-check
+    - name: build toolchain
+      run: ../source-builder/sb-set-builder --prefix=$HOME/.rtems --log powerpc.log 5/rtems-powerpc
+    - name: build kernel
+      run: ../source-builder/sb-set-builder --prefix=$HOME/.rtems --log powerpc-mvme3100.log --host=powerpc-rtems5 --target=powerpc-rtems5 --with-rtems-bsp=mvme3100 5/rtems-kernel 5/rtems-libbsd
+    - name: error log
+      if: ${{ failure() }}
+      run: |
+        echo "==============="
+        tail -n 100 powerpc.log
+        echo "==============="
+        tail -n 100 powerpc-mvme3100.log

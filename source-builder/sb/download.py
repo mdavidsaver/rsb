@@ -24,6 +24,7 @@
 
 from __future__ import print_function
 
+import base64
 import hashlib
 import os
 import re
@@ -71,7 +72,7 @@ def _humanize_bytes(bytes, precision = 1):
     return '%.*f%s' % (precision, float(bytes) / factor, suffix)
 
 def _sensible_url(url, used = 0):
-    space = 200
+    space = 100
     if len(url) > space:
         size = int(space - 14)
         url = url[:size] + '...<see log>'
@@ -110,8 +111,13 @@ def _hash_check(file_, absfile, macros, remove = True):
             raise
         if _in is not None:
             _in.close()
-        log.output('checksums: %s: %s => %s' % (file_, hasher.hexdigest(), hash[1]))
-        if hasher.hexdigest() != hash[1]:
+        hash_hex = hasher.hexdigest()
+        hash_base64 = base64.b64encode(hasher.digest()).decode('utf-8')
+        log.output('checksums: %s: (hex: %s) (b64: %s) => %s' % (file_,
+                                                                 hash_hex,
+                                                                 hash_base64,
+                                                                 hash[1]))
+        if hash_hex != hash[1] and hash_base64 != hash[1]:
             log.warning('checksum error: %s' % (file_))
             failed = True
         if failed and remove:
@@ -509,6 +515,15 @@ def _git_downloader(url, local, config, opts):
             log.notice('git: reset: %s' % (us[0]))
             if _do_download(opts):
                 repo.reset(arg)
+                repo.submodule_foreach(['reset'] + arg)
+        elif _as[0] == 'clean':
+            arg = []
+            if len(_as) > 1:
+                arg = ['--%s' % (_as[1])]
+            log.notice('git: clean: %s' % (us[0]))
+            if _do_download(opts):
+                repo.clean(arg)
+                repo.submodule_foreach(['clean'] + arg)
         elif _as[0] == 'protocol':
             pass
         else:
@@ -593,16 +608,19 @@ def get_file(url, local, opts, config):
         raise error.general('source not found: %s' % (path.host(local)))
     #
     # Check if a URL has been provided on the command line. If the package is
-    # released push to the start the RTEMS URL unless overrided by the command
-    # line option --with-release-url. The variant --without-release-url can
-    # override the released check.
+    # released push the release path URLs to the start the RTEMS URL list
+    # unless overriden by the command line option --without-release-url. The
+    # variant --without-release-url can override the released check.
     #
     url_bases = opts.urls()
+    if url_bases is None:
+        url_bases = []
     try:
         rtems_release_url_value = config.macros.expand('%{release_path}')
     except:
         rtems_release_url_value = None
     rtems_release_url = None
+    rtems_release_urls = []
     if version.released() and rtems_release_url_value:
         rtems_release_url = rtems_release_url_value
     with_rel_url = opts.with_arg('release-url')
@@ -621,18 +639,17 @@ def get_file(url, local, opts, config):
     elif with_rel_url[0] == 'without_release-url' and with_rel_url[1] == 'yes':
         rtems_release_url = None
     if rtems_release_url is not None:
-        log.trace('release url: %s' % (rtems_release_url))
-        #
-        # If the URL being fetched is under the release path do not add the
-        # sources release path because it is already there.
-        #
-        if not url.startswith(rtems_release_url):
-            if url_bases is None:
-                url_bases = [rtems_release_url]
-            else:
-                url_bases.append(rtems_release_url)
+        rtems_release_urls = rtems_release_url.split(',')
+        for release_url in rtems_release_urls:
+            log.trace('release url: %s' % (release_url))
+            #
+            # If the URL being fetched is under the release path do not add
+            # the sources release path because it is already there.
+            #
+            if not url.startswith(release_url):
+                url_bases = [release_url] + url_bases
     urls = []
-    if url_bases is not None:
+    if len(url_bases) > 0:
         #
         # Split up the URL we are being asked to download.
         #
@@ -648,7 +665,7 @@ def get_file(url, local, opts, config):
             # Hack to fix #3064 where --rsb-file is being used. This code is a
             # mess and should be refactored.
             #
-            if version.released() and base == rtems_release_url:
+            if version.released() and base in rtems_release_urls:
                 url_file = path.basename(local)
             if base[-1:] != '/':
                 base += '/'

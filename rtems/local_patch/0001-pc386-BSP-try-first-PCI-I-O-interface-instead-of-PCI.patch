@@ -1,0 +1,45 @@
+From a240453d70494df793975cc59a9008a05c6c3e2c Mon Sep 17 00:00:00 2001
+From: Karel Gardas <karel.gardas@centrum.cz>
+Date: Mon, 31 Aug 2020 14:35:28 +0200
+Subject: [PATCH] pc386 BSP: try first PCI I/O interface instead of PCI BIOS
+ interface
+
+This patch changes ordering of PCI bus initialization in pc386 BSP. Instead
+of PCI BIOS access we first attempt PCI I/O access and if it is successful
+we use that. The reason for this is that some system (old Lenovo T400/T500)
+provides both BIOS and I/O access method, but BIOS is ridiculous slow. When
+BSP was using this, then T400/T500 waited minutes on PCI UART scanning before
+continuing with RTEMS application code. With this patch applied, both
+T500 and T400 works fine.
+---
+ bsps/i386/pc386/start/bspstart.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/bsps/i386/pc386/start/bspstart.c b/bsps/i386/pc386/start/bspstart.c
+index db1ca90cf4..d204359569 100644
+--- a/bsps/i386/pc386/start/bspstart.c
++++ b/bsps/i386/pc386/start/bspstart.c
+@@ -51,16 +51,16 @@ static void bsp_pci_initialize_helper(void)
+ {
+   const pci_config_access_functions *pci_accessors;
+ 
+-  pci_accessors = pci_bios_initialize();
++  pci_accessors = pci_io_initialize();
+   if (pci_accessors != NULL) {
+-    printk("PCI bus: using PCI BIOS interface\n");
++    printk("PCI bus: using PCI I/O interface\n");
+     BSP_pci_configuration.pci_functions = pci_accessors;
+     return;
+   }
+ 
+-  pci_accessors = pci_io_initialize();
++  pci_accessors = pci_bios_initialize();
+   if (pci_accessors != NULL) {
+-    printk("PCI bus: using PCI I/O interface\n");
++    printk("PCI bus: using PCI BIOS interface\n");
+     BSP_pci_configuration.pci_functions = pci_accessors;
+     return;
+   }
+-- 
+2.17.1
+

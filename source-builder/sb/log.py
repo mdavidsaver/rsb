@@ -45,6 +45,7 @@ tracing = False
 quiet = False
 
 def set_default_once(log):
+    global default
     if default is None:
         default = log
 
@@ -91,7 +92,7 @@ def notice(text = os.linesep, log = None):
     _output(text, log)
 
 def trace(text = os.linesep, log = None):
-    if tracing:
+    if not quiet and tracing:
         _output(text, log)
 
 def warning(text = os.linesep, log = None):

@@ -30,12 +30,14 @@ import re
 import os
 import string
 
+import download
 import error
 import execute
 import git
 import log
 import macros
 import path
+import sources
 import sys
 
 import version
@@ -53,12 +55,13 @@ class command_line:
 
     def __init__(self, argv, optargs, _defaults, command_path):
         self._long_opts = {
-            # key                 macro                handler            param  defs   init
+            # key                       macro                handler            param  defs   init
             '--prefix'               : ('_prefix',           self._lo_path,     True,  None,  False),
             '--topdir'               : ('_topdir',           self._lo_path,     True,  None,  False),
             '--configdir'            : ('_configdir',        self._lo_path,     True,  None,  False),
             '--builddir'             : ('_builddir',         self._lo_path,     True,  None,  False),
             '--sourcedir'            : ('_sourcedir',        self._lo_path,     True,  None,  False),
+            '--patchdir'             : ('_patchdir',         self._lo_path,     True,  None,  False),
             '--tmppath'              : ('_tmppath',          self._lo_path,     True,  None,  False),
             '--jobs'                 : ('_jobs',             self._lo_jobs,     True,  'max', True),
             '--log'                  : ('_logfile',          self._lo_string,   True,  None,  False),
@@ -82,6 +85,9 @@ class command_line:
             '--host'                 : ('_host',             self._lo_triplets, True,  None,  False),
             '--build'                : ('_build',            self._lo_triplets, True,  None,  False),
             '--target'               : ('_target',           self._lo_triplets, True,  None,  False),
+            '--rtems-tools'          : ('_rtems_tools',      self._lo_string,   True,  None,  False),
+            '--rtems-bsp'            : ('_rtems_bsp',        self._lo_string,   True,  None,  False),
+            '--rtems-version'        : ('_rtems_version',    self._lo_string,   True,  None,  False),
             '--help'                 : (None,                self._lo_help,     False, None,  False)
             }
 
@@ -95,7 +101,9 @@ class command_line:
         for lo in self._long_opts:
             self.opts[lo[2:]] = self._long_opts[lo][3]
             if self._long_opts[lo][4]:
-                self.defaults[self._long_opts[lo][0]] = ('none', 'none', self._long_opts[lo][3])
+                self.defaults[self._long_opts[lo][0]] = ('none',
+                                                         'none',
+                                                         self._long_opts[lo][3])
 
     def __str__(self):
         def _dict(dd):
@@ -194,7 +202,7 @@ class command_line:
 
     def help(self):
         print('%s: [options] [args]' % (self.command_name))
-        print('RTEMS Source Builder, an RTEMS Tools Project (c) 2012-2015 Chris Johns')
+        print('RTEMS Source Builder, an RTEMS Tools Project (c) 2012-2019 Chris Johns')
         print('Options and arguments:')
         print('--force                : Force the build to proceed')
         print('--quiet                : Quiet output (not used)')
@@ -214,6 +222,7 @@ class command_line:
         print('--configdir path       : Path to the configuration directory, default: ./config')
         print('--builddir path        : Path to the build directory, default: ./build')
         print('--sourcedir path       : Path to the source directory, default: ./source')
+        print('--patchdir path        : Path to the patches directory, default: ./patches')
         print('--tmppath path         : Path to the temp directory, default: ./tmp')
         print('--macros file[,[file]  : Macro format files to load after the defaults')
         print('--log file             : Log file where all build out is written too')
@@ -235,20 +244,22 @@ class command_line:
         raise error.exit()
 
     def process(self):
+        for a in self.args:
+            if a == '-?' or a == '--help':
+                self.help()
         arg = 0
         while arg < len(self.args):
             a = self.args[arg]
-            if a == '-?':
-                self.help()
-            elif a.startswith('--'):
-                los = a.split('=')
+            if a.startswith('--'):
+                los = a.split('=', 1)
                 lo = los[0]
                 if lo in self._long_opts:
                     long_opt = self._long_opts[lo]
                     if len(los) == 1:
                         if long_opt[2]:
                             if arg == len(self.args) - 1:
-                                raise error.general('option requires a parameter: %s' % (lo))
+                                raise error.general('option requires a parameter: %s' % \
+                                                    (lo))
                             arg += 1
                             value = self.args[arg]
                         else:
@@ -262,8 +273,14 @@ class command_line:
                             value = los[1]
                         else:
                             value = '1'
-                        self.defaults[los[0][2:].replace('-', '_').lower()] = ('none', 'none', value)
+                        self.defaults[los[0][2:].replace('-', '_').lower()] = \
+                            ('none', 'none', value)
+                    else:
+                        if lo not in self.optargs:
+                            raise error.general('unknown option: %s' % (lo))
             else:
+                if a.startswith('-'):
+                    raise error.general('short options not supported; only "-?"')
                 self.opts['params'].append(a)
             arg += 1
 
@@ -273,10 +290,12 @@ class command_line:
             a = self.args[arg]
             if a == '--source-only-download':
                 self.args += ['--dry-run',
+                              '--with-download',
                               '--quiet',
                               '--without-log',
-                              '--without-error-report',
-                              '--without-release-url']
+                              '--without-error-report']
+            if a == '--dry-run':
+                self.args += ['--without-error-report']
             arg += 1
 
     def post_process(self, logfile = True):
@@ -298,6 +317,14 @@ class command_line:
         # Must have a host
         if self.defaults['_build'] == self.defaults['nil']:
             raise error.general('--build not set')
+        # Default prefix
+        prefix = self.parse_args('--prefix')
+        if prefix is None:
+            value = path.join(self.defaults['_prefix'],
+                              'rtems',
+                              str(self.defaults['rtems_version']))
+            self.opts['prefix'] = value
+            self.defaults['_prefix'] = value
         # Manage the regression option
         if self.opts['regression'] != '0':
             self.opts['no-install'] = '1'
@@ -319,7 +346,8 @@ class command_line:
         if um:
             checked = path.exists(um)
             if False in checked:
-                raise error.general('macro file not found: %s' % (um[checked.index(False)]))
+                raise error.general('macro file not found: %s' % \
+                                    (um[checked.index(False)]))
             for m in um:
                 self.defaults.load(m)
         # Check if the user has a private set of macros to load
@@ -334,7 +362,7 @@ class command_line:
     def sb_released(self):
         if version.released():
             self.defaults['rsb_released'] = '1'
-        self.defaults['rsb_version'] = version.str()
+        self.defaults['rsb_version'] = version.string()
 
     def sb_git(self):
         repo = git.repo(self.defaults.expand('%{_sbdir}'), self)
@@ -402,10 +430,13 @@ class command_line:
         _host = self.defaults.expand('%{_host}')
         _build = self.defaults.expand('%{_build}')
         _target = self.defaults.expand('%{_target}')
-        if len(_target):
-            return len(_host) and len(_build) and (_target) and \
-                _host != _build and _host != _target
-        return len(_host) and len(_build) and _host != _build
+        #
+        # The removed fix has been put back. I suspect
+        # this was done as a result of another issue that
+        # has been fixed.
+        #
+        return len(_target) and len(_host) and len(_build) \
+            and _host != _build and _host != _target
 
     def user_macros(self):
         #
@@ -467,7 +498,7 @@ class command_line:
                 lhs = None
                 rhs = None
                 if '=' in self.args[a]:
-                    eqs = self.args[a].split('=')
+                    eqs = self.args[a].split('=', 1)
                     lhs = eqs[0]
                     if len(eqs) > 2:
                         rhs = '='.join(eqs[1:])
@@ -566,6 +597,12 @@ class command_line:
             if self.get_arg('--with-tools') is not None:
                 raise error.general('--rtems-tools and --with-tools cannot be used together')
             self.args.append('--with-tools=%s' % (rtems_tools[1]))
+        rtems_version = self.parse_args('--rtems-version')
+        if rtems_version is None:
+            rtems_version = str(version.version())
+        else:
+            rtems_version = rtems_version[1]
+        self.defaults['rtems_version'] = rtems_version
         rtems_arch_bsp = self.parse_args('--rtems-bsp')
         if rtems_arch_bsp is not None:
             if self.get_arg('--target') is not None:
@@ -573,11 +610,6 @@ class command_line:
             ab = rtems_arch_bsp[1].split('/')
             if len(ab) != 2:
                 raise error.general('invalid --rtems-bsp option')
-            rtems_version = self.parse_args('--rtems-version')
-            if rtems_version is None:
-                rtems_version = version.version()
-            else:
-                rtems_version = rtems_version[1]
             self.args.append('--target=%s-rtems%s' % (ab[0], rtems_version))
             self.args.append('--with-rtems-bsp=%s' % (ab[1]))
 
@@ -593,9 +625,14 @@ def load(args, optargs = None, defaults = '%{_sbdir}/defaults.mc', logfile = Tru
     global host_posix
 
     #
+    # Adjust the args to remove the wrapper.
+    #
+    args = args[1:]
+
+    #
     # The path to this command.
     #
-    command_path = path.dirname(args[0])
+    command_path = path.dirname(path.abspath(args[0]))
     if len(command_path) == 0:
         command_path = '.'
 
@@ -664,14 +701,28 @@ def load(args, optargs = None, defaults = '%{_sbdir}/defaults.mc', logfile = Tru
     #
     # Load the release settings
     #
-    version.load_release_settings(o.defaults)
-
+    def setting_error(msg):
+        raise error.general(msg)
+    hashes = version.load_release_settings('hashes')
+    for hash in hashes:
+        hs = hash[1].split()
+        if len(hs) != 2:
+            raise error.general('invalid release hash in VERSION')
+        sources.hash((hs[0], hash[0], hs[1]), o.defaults, setting_error)
+    release_path = version.load_release_setting('version', 'release_path',
+                                                raw = True)
+    if release_path is not None:
+        try:
+            release_path = ','.join([rp.strip() for rp in release_path.split(',')])
+        except:
+            raise error.general('invalid release path in VERSION')
+        download.set_release_path(release_path, o.defaults)
     return o
 
 def run(args):
     try:
         _opts = load(args = args, defaults = 'defaults.mc')
-        log.notice('RTEMS Source Builder - Defaults, %s' % (version.str()))
+        log.notice('RTEMS Source Builder - Defaults, %s' % (version.string()))
         _opts.log_info()
         log.notice('Options:')
         log.notice(str(_opts))

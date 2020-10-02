@@ -27,9 +27,11 @@ import os
 
 import error
 import execute
+import fnmatch
 import log
 import options
 import path
+import re
 import version
 
 def _check_none(_opts, macro, value, constraint):
@@ -102,20 +104,24 @@ def path_check(opts, silent = False):
     if 'PATH' in os.environ:
         paths = os.environ['PATH'].split(os.pathsep)
         for p in paths:
-            if len(p.strip()) == 0:
+            try:
+                if len(p.strip()) == 0:
+                    if not silent:
+                        log.notice('error: environment PATH contains an empty path')
+                    return False
+                elif not options.host_windows and (p.strip() == '.' or p.strip() == '..'):
+                    if not silent:
+                        log.notice('error: environment PATH invalid path: %s' % (p))
+                    return False
+                elif not path.exists(p):
+                    if not silent and opts.warn_all():
+                        log.notice('warning: environment PATH not found: %s' % (p))
+                elif not path.isdir(p):
+                    if not silent and opts.warn_all():
+                        log.notice('warning: environment PATH not a directory: %s' % (p))
+            except Exception as e:
                 if not silent:
-                    log.notice('error: environment PATH contains an empty path')
-                return False
-            elif not options.host_windows and (p.strip() == '.' or p.strip() == '..'):
-                if not silent:
-                    log.notice('error: environment PATH invalid path: %s' % (p))
-                return False
-            elif not path.exists(p):
-                if not silent and opts.warn_all():
-                    log.notice('warning: environment PATH not found: %s' % (p))
-            elif not path.isdir(p):
-                if not silent and opts.warn_all():
-                    log.notice('warning: environment PATH not a directory: %s' % (p))
+                    log.notice('warning: environment PATH suspicious path: %s' % (e))
     return True
 
 
@@ -162,15 +168,117 @@ def check_exe(label, exe):
     return _check_exe(None, label, exe, None, True)
 
 
+def check_orphans(opts):
+
+    def _find_files(path, globs, excludes = []):
+        ff = []
+        for root, dirs, files in os.walk(path, followlinks = True):
+            for f in files:
+                for g in globs:
+                    if fnmatch.fnmatch(f, g) and f not in excludes:
+                        ff += [os.path.join(root, f)]
+        return sorted(ff)
+
+    def _clean(line):
+        line = line[0:-1]
+        b = line.find('#')
+        if b >= 0:
+            line = line[1:b]
+        return line.strip()
+
+    def _find(name, opts):
+        ename = opts.defaults.expand(name)
+        if ':' in ename:
+            paths = path.dirname(ename).split(':')
+            name = path.basename(name)
+        else:
+            paths = opts.defaults.get_value('_configdir').split(':')
+        for p in paths:
+            n = path.join(opts.defaults.expand(p), name)
+            if path.exists(n):
+                return n
+        return None
+
+    paths = opts.defaults.get_value('_configdir').split(':')
+
+    cfgs = {}
+    for p in paths:
+        ep = opts.defaults.expand(p)
+        print('Scanning: %s (%s)' % (p, ep))
+        for f in _find_files(ep, ['*.cfg', '*.bset']):
+            root, ext = path.splitext(f)
+            cfgs[f] = { 'src': None, 'ext': ext, 'refs': 0, 'errors':[] }
+
+    wss = re.compile(r'\s+')
+
+    for c in cfgs:
+        with open(c, 'r') as f:
+            cfgs[c]['src'] = f.readlines()
+        lc = 0
+        for l in cfgs[c]['src']:
+            lc += 1
+            l = _clean(l)
+            if len(l) == 0:
+                continue
+            if l[0] == '%':
+                ls = wss.split(l, 2)
+                if ls[0] == '%include':
+                    name = _find(ls[1], opts)
+                    if name is None:
+                        cfgs[c]['errors'] += [lc]
+                    elif name not in cfgs:
+                        raise error.general('include: %s: not present' % (ls[1]))
+                    else:
+                        cfgs[name]['refs'] += 1
+            elif cfgs[c]['ext'] == '.bset' and ':' not in l:
+                for ext in ['', '.cfg', '.bset']:
+                    name = _find(l + ext, opts)
+                    if name is not None:
+                        if name not in cfgs:
+                            raise error.general('include: %s: not present' % (ls[1]))
+                        else:
+                            cfgs[name]['refs'] += 1
+                        break
+
+    topdir = opts.defaults.expand('%{_topdir}')
+
+    orphans = []
+    show = True
+
+    for c in cfgs:
+        if cfgs[c]['refs'] == 0:
+            orphans += [c]
+        if len(cfgs[c]['errors']) != 0:
+            if show:
+                print('Warnings:')
+                show = False
+            print(' %s:' % (path.relpath(c)))
+            for l in cfgs[c]['errors']:
+                print('  %3d: %s' % (l, cfgs[c]['src'][l - 1][:-1]))
+
+    show = True
+
+    for o in sorted(orphans):
+        if show:
+            print('Orphans:')
+            show = False
+        print(' %s' % (path.relpath(o)))
+
 def run():
     import sys
     try:
-        _opts = options.load(args = sys.argv)
-        log.notice('RTEMS Source Builder - Check, %s' % (version.str()))
-        if host_setup(_opts):
-            print('Environment is ok')
+        _opts = options.load(args = sys.argv, logfile = False)
+        log.notice('RTEMS Source Builder - Check, %s' % (version.string()))
+
+        orphans = _opts.parse_args('--check-orphans', error = False, extra = False)
+        if orphans:
+            print('Checking for orphans...')
+            check_orphans(_opts)
         else:
-            print('Environment is not correctly set up')
+            if host_setup(_opts):
+                print('Environment is ok')
+            else:
+                print('Environment is not correctly set up')
     except error.general as gerr:
         print(gerr)
         sys.exit(1)

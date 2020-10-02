@@ -34,14 +34,6 @@ import options
 import path
 import version
 
-def _collect_dirs(path_, dir):
-    confs = []
-    for root, dirs, files in os.walk(path.host(path_), topdown = True):
-        for f in dirs:
-            if f == dir:
-                confs += [path.shell(path.join(root, f))]
-    return confs
-
 def _collect(path_, file):
     confs = []
     for root, dirs, files in os.walk(path.host(path_), topdown = True):
@@ -124,7 +116,7 @@ class command:
 
     def reraise(self):
         if self.result is not None:
-            raise self.result[0](self.result[1]).with_traceback(self.result[2])
+            raise self.result[0](self.result[1])
 
 class autoreconf:
 
@@ -132,32 +124,8 @@ class autoreconf:
         self.topdir = topdir
         self.configure = configure
         self.cwd = path.dirname(self.configure)
-        self.bspopts()
         self.command = command(['autoreconf', '-i', '--no-recursive'], self.cwd)
         self.command.run()
-
-    def bspopts(self):
-        if _grep(self.configure, 'RTEMS_CHECK_BSPDIR'):
-            bsps = _collect_dirs(self.cwd, 'custom')
-            try:
-                acinclude = path.join(self.cwd, 'acinclude.m4')
-                b = open(path.host(acinclude), 'w')
-                b.write('# RTEMS_CHECK_BSPDIR(RTEMS_BSP_FAMILY)' + os.linesep)
-                b.write('AC_DEFUN([RTEMS_CHECK_BSPDIR],' + os.linesep)
-                b.write('[' + os.linesep)
-                b.write('  case "$1" in' + os.linesep)
-                for bs in sorted(bsps):
-                    dir = path.dirname(bs)[len(self.cwd) + 1:]
-                    dir = path.dirname(dir)
-                    b.write('  %s )%s' % (dir, os.linesep))
-                    b.write('    AC_CONFIG_SUBDIRS([%s]);;%s' % (dir, os.linesep))
-                b.write('  *)' + os.linesep)
-                b.write('    AC_MSG_ERROR([Invalid BSP]);;' + os.linesep)
-                b.write('  esac' + os.linesep)
-                b.write('])' + os.linesep)
-                b.close()
-            except IOError as err:
-                raise error.general('writing: %s' % (acinclude))
 
     def is_alive(self):
         return self.command.is_alive()
@@ -276,7 +244,7 @@ def run(args):
                     del os.environ['ACLOCAL_PATH']
         optargs = { '--rtems':       'The RTEMS source directory',
                     '--preinstall':  'Preinstall AM generation' }
-        log.notice('RTEMS Source Builder - RTEMS Bootstrap, %s' % (version.str()))
+        log.notice('RTEMS Source Builder - RTEMS Bootstrap, %s' % (version.string()))
         opts = options.load(sys.argv, optargs, logfile = False)
         if opts.get_arg('--rtems'):
             topdir = opts.get_arg('--rtems')
