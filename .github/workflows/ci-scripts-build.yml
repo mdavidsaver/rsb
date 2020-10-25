@@ -7,8 +7,8 @@ defaults:
     working-directory: rtems
 
 jobs:
-  build-pc686:
-    name: pc686
+  build-pc386:
+    name: pc386
     runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@v2
@@ -28,3 +28,26 @@ jobs:
         for ff in $HOME/.rtems/i386-rtems5/pc386/tests/*.exe; do
           echo "==== $ff";
         done
+
+  build-mvme3100:
+    name: mvme3100
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v2
+    - name: system deps
+      run: sudo apt-get -y update && sudo apt-get -y install bison flex texinfo unzip git python-dev
+    - name: check
+      run: ../source-builder/sb-check
+    - name: build
+      run: ../source-builder/sb-set-builder --prefix=$HOME/.rtems --log powerpc.log --with-rtems --with-rtems-tests=samples --with-rtemsbsp=mvme3100 4.9/rtems-powerpc.bset
+    - name: error log
+      run: |
+        echo "==============="
+        tail -n 100 powerpc.log
+    - name: run tests
+      run: |
+        find $HOME/.rtems -name '*.exe'
+        for ff in $HOME/.rtems/powerpc-rtems5/mvme3100/tests/*.exe; do
+          echo "==== $ff";
+        done
+
