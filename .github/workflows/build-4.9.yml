@@ -1,0 +1,91 @@
+name: RTEMS 4.9
+
+on: [push, pull_request]
+
+defaults:
+  run:
+    working-directory: rtems
+
+
+jobs:
+    # Release prep, only for tags
+    prepare:
+        name: Release Prep
+        runs-on: ubuntu-20.04
+        outputs:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+        steps:
+            - uses: actions/checkout@v2
+
+            - name: Create Release ${{ github.ref }}
+              # only release tags
+              if: startsWith(github.ref, 'refs/tags/')
+              id: create_release
+              uses: actions/create-release@v1
+              env:
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                tag_name: ${{ github.ref }}
+                release_name: Release ${{ github.ref }}
+                draft: true
+                prerelease: false
+
+    build:
+        name: Build ${{ matrix.arch }}/${{ matrix.bsps }}
+        runs-on: ubuntu-20.04
+        # depending on prepare populates needs.prepare.outputs.
+        needs: prepare
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                - arch: i386
+                  # may be a commma separated list
+                  bsps: pc386
+        steps:
+            - uses: actions/checkout@v2
+
+            - name: system deps
+              run: sudo apt-get -y update && sudo apt-get -y install bison flex texinfo unzip git python-dev qemu-system-x86 cmake
+
+            - name: check
+              run: ../source-builder/sb-check
+
+            - name: build
+              run: |
+                ../source-builder/sb-set-builder \
+                 --log build.log --no-install --bset-tar-file \
+                 --prefix "/opt/rtems/4.9" \
+                 --with-rtems \
+                 --with-rtems-tests=samples \
+                 --with-rtemsbsp="${{ matrix.bsps }}" \
+                 4.9/rtems-${{ matrix.arch }}.bset
+
+            - name: recompress
+              run: |
+                 ls -lh tar
+                 bzip2 -cd tar/*rtems*kernel*.tar.bz2 | xz -T 0 -9e > ../${{ matrix.arch }}-${{ matrix.bsps }}-rtems4.9.tar.xz
+                 ls -lh ../*.xz
+
+            - name: error log
+              if: ${{ failure() }}
+              run: tail -n 100 build.log
+
+            # upload to possible manual testing
+            - name: stash
+              uses: actions/upload-artifact@v2
+              with:
+                  name: bsp-${{ matrix.bsps }}
+                  path: ./${{ matrix.arch }}-${{ matrix.bsps }}-rtems4.9.tar.xz
+                  retention-days: 1
+
+            - name: release
+              if: startsWith(github.ref, 'refs/tags/')
+              uses: actions/upload-release-asset@v1
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                  upload_url: ${{ needs.prepare.outputs.upload_url }}
+                  asset_path: ./${{ matrix.arch }}-${{ matrix.bsps }}-rtems4.9.tar.xz
+                  asset_name: ${{ matrix.arch }}-${{ matrix.bsps }}-rtems4.9.tar.xz
+                  asset_content_type: application/x-tar
