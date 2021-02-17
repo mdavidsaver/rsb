@@ -97,34 +97,44 @@ jobs:
                 include:
                 - arch: i386
                   bsp: pc686
+                  extra: 5/rtems-libbsd
                   test: true
 
                 - arch: powerpc
                   bsp: beatnik
+                  kopts: --with-rtems-legacy-network
 
                 - arch: powerpc
                   bsp: mcp750
+                  kopts: --with-rtems-legacy-network
 
                 - arch: powerpc
                   bsp: mvme2100
+                  kopts: --with-rtems-legacy-network
 
                 - arch: powerpc
                   bsp: mvme3100
+                  kopts: --with-rtems-legacy-network
 
                 - arch: powerpc
                   bsp: qoriq_e500
+                  extra: 5/rtems-libbsd
 
                 - arch: arm
                   bsp: xilinx_zynq_a9_qemu
+                  extra: 5/rtems-libbsd
 
                 - arch: m68k
                   bsp: gen68360
+                  kopts: --with-rtems-legacy-network
 
                 - arch: m68k
                   bsp: mvme167
+                  kopts: --with-rtems-legacy-network
 
                 - arch: m68k
                   bsp: uC5282
+                  kopts: --with-rtems-legacy-network
         steps:
             - uses: actions/checkout@v2
 
@@ -150,7 +160,7 @@ jobs:
                 export PATH=/opt/rtems/5/bin:$PATH
                 ../source-builder/sb-set-builder --prefix=/opt/rtems/5 --log build.log \
                 --host=${{ matrix.arch }}-rtems5 --target=${{ matrix.arch }}-rtems5 \
-                --with-rtems-bsp=${{ matrix.bsp }} 5/rtems-kernel 5/rtems-libbsd
+                --with-rtems-bsp=${{ matrix.bsp }} ${{ matrix.kopts }} 5/rtems-kernel ${{ matrix.extra }}
 
             - name: error log
               if: ${{ failure() }}
@@ -166,14 +176,14 @@ jobs:
 
             - name: tar
               run: |
-                tar -C / -cv /opt/rtems/5 | xz -T 0 -9e > ../${{ matrix.arch }}-${{ matrix.bsp }}-rtems5.tar.xz
+                tar -C / -cv /opt/rtems/5 | xz -T 0 -9e > ../${{ matrix.bsp }}-rtems5.tar.xz
 
             # upload to possible manual testing
             - name: stash
               uses: actions/upload-artifact@v2
               with:
                   name: bsp-${{ matrix.bsp }}
-                  path: ./${{ matrix.arch }}-${{ matrix.bsp }}-rtems5.tar.xz
+                  path: ./${{ matrix.bsp }}-rtems5.tar.xz
                   retention-days: 1
 
             - name: release
@@ -183,6 +193,6 @@ jobs:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               with:
                   upload_url: ${{ needs.prepare.outputs.upload_url }}
-                  asset_path: ./${{ matrix.arch }}-${{ matrix.bsp }}-rtems5.tar.xz
-                  asset_name: ${{ matrix.arch }}-${{ matrix.bsp }}-rtems5.tar.xz
+                  asset_path: ./${{ matrix.bsp }}-rtems5.tar.xz
+                  asset_name: ${{ matrix.bsp }}-rtems5.tar.xz
                   asset_content_type: application/x-tar
