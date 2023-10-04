@@ -12,7 +12,7 @@ jobs:
         name: Build ${{ matrix.arch }}/${{ matrix.bsps }}
         runs-on: ubuntu-latest
         container:
-            image: debian:11
+            image: debian:10
         strategy:
             fail-fast: false
             matrix:
